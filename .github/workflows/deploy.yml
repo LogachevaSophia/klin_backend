@@ -1,0 +1,118 @@
+name: Deploy Backend to VM
+
+on:
+  # Автоматический запуск при мердже PR
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+      - master
+
+  # Ручной запуск через GitHub UI
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    # Запускаем если PR был смерджен ИЛИ это ручной запуск
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: klin-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BACKEND_PORT=${{ secrets.BACKEND_PORT }}
+
+      - name: Save Docker image
+        run: |
+          docker save klin-backend:latest | gzip > klin-backend.tar.gz
+
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Deploy to VM
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+          BACKEND_PORT: ${{ secrets.BACKEND_PORT }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
+        run: |
+          # Копируем образ на VM
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            klin-backend.tar.gz $VM_USER@$VM_HOST:/tmp/
+
+          # Деплой на VM
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $VM_USER@$VM_HOST << 'ENDSSH'
+            set -e
+
+            echo "🚀 Начало развертывания бэкенда..."
+
+            # Загружаем Docker image
+            echo "📦 Загрузка Docker образа..."
+            docker load -i /tmp/klin-backend.tar.gz
+
+            # Останавливаем и удаляем старый контейнер
+            echo "🛑 Остановка старого контейнера..."
+            docker stop klin-backend 2>/dev/null || true
+            docker rm klin-backend 2>/dev/null || true
+
+            # Запускаем новый контейнер
+            echo "▶️  Запуск нового контейнера..."
+            docker run -d \
+              --name klin-backend \
+              --restart unless-stopped \
+              -p ${{ env.BACKEND_PORT }}:${{ env.BACKEND_PORT }} \
+              -e BACKEND_PORT="${{ env.BACKEND_PORT }}" \
+              -e DATABASE_URL="${{ env.DATABASE_URL }}" \
+              -e CORS_ORIGINS="${{ env.CORS_ORIGINS }}" \
+              klin-backend:latest
+
+            # Очищаем старые images
+            docker image prune -f
+
+            # Удаляем временный файл
+            rm -f /tmp/klin-backend.tar.gz
+
+            # Проверяем статус
+            echo "✅ Проверка статуса контейнера..."
+            docker ps | grep klin-backend
+
+            echo "🎉 Развертывание завершено!"
+          ENDSSH
+
+      - name: Verify Deployment
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+        run: |
+          echo "📋 Последние логи контейнера:"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            $VM_USER@$VM_HOST "docker logs --tail 30 klin-backend"
+
+      - name: Notify on Success
+        if: success()
+        run: |
+          echo "✅ Deployment successful!"
+          echo "Backend is now running on http://${{ secrets.VM_HOST }}:${{ secrets.BACKEND_PORT }}"
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed! Check the logs above."
+          exit 1

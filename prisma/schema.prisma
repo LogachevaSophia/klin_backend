@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Типы нод: 0=Start, 1=Finish, 2=Condition, 3=Action, 4=Subprocess, 5=Loop
+model Process {
+  id   String @id @default(uuid()) @db.Uuid
+  name String @default("")
+
+  nodes          Node[] @relation("ProcessNodes")
+  subprocessRefs Node[] @relation("SubprocessRef")
+  edges          Edge[]
+}
+
+model Node {
+  pk           Int     @id @default(autoincrement())
+  nodeId       Int
+  processId    String  @db.Uuid
+  type         Int     @default(3)
+  data         Json
+  jsonData     Json
+  subprocessId String? @db.Uuid
+
+  process    Process  @relation("ProcessNodes", fields: [processId], references: [id], onDelete: Cascade)
+  subprocess Process? @relation("SubprocessRef", fields: [subprocessId], references: [id], onDelete: SetNull)
+
+  @@unique([nodeId, processId])
+}
+
+model Edge {
+  pk           Int     @id @default(autoincrement())
+  edgeId       Int
+  processId    String  @db.Uuid
+  source       Int
+  target       Int
+  label        String?
+  data         Json?
+  sourceHandle String?
+  targetHandle String?
+  style        Json?
+
+  process Process @relation(fields: [processId], references: [id], onDelete: Cascade)
+
+  @@unique([edgeId, processId])
+}
