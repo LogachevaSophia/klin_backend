@@ -1,9 +1,15 @@
 function parseCorsOrigins(raw: string | undefined): string | string[] {
   if (!raw) return '*';
+  // Уже просто звёздочка или URL
+  if (raw === '*') return '*';
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    // ["*"] → '*' для совместимости с cors()
+    if (Array.isArray(parsed) && parsed.length === 1 && parsed[0] === '*') return '*';
+    return parsed;
   } catch {
-    return raw;
+    // Невалидный JSON (например [*] без кавычек) → разрешаем всё
+    return '*';
   }
 }
 
