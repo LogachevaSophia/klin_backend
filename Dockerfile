@@ -5,8 +5,11 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Обновляем npm до последней версии (npm 10 на Alpine имеет баг с install)
+RUN npm install -g npm@latest
+
 COPY package*.json ./
-RUN npm install --frozen-lockfile
+RUN npm ci
 
 COPY tsconfig.json ./
 COPY prisma ./prisma
