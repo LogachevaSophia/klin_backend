@@ -3,6 +3,9 @@ ARG BACKEND_PORT=8000
 
 FROM node:20-alpine
 
+# Устанавливаем OpenSSL — требуется для Prisma query engine на Alpine
+RUN apk add --no-cache openssl
+
 WORKDIR /app
 
 # Обновляем npm до последней версии (npm 10 на Alpine имеет баг с install)
